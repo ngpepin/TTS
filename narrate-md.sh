@@ -45,10 +45,10 @@
 #   - In this script, Coqui-TTS is used within a Docker container to generate audio files from text input.
 
 # Paramaters
-MAX_LINES_PER_CHUNK=20 # Maximum lines per chunk of the markdown file
+MAX_LINES_PER_CHUNK=20          # Maximum lines per chunk of the markdown file
 MODEL="tts_models/en/vctk/vits" # VCTK model
-SPEAKER="p230" # VCTK speaker ID
-CONTAINER="coqui-tts" # Docker container name
+SPEAKER="p230"                  # VCTK speaker ID
+CONTAINER="coqui-tts"           # Docker container name
 # MODEL="tts_models/en/ljspeech/tacotron2-DDC_ph"
 # VOCODER="vocoder_models/en/ljspeech/univnet"
 
@@ -103,6 +103,9 @@ cd "$app_dir" >/dev/null 2>&1 || {
 mkdir -p input output logs models >/dev/null 2>&1
 # TODO: make the container use the models/ bindmount to avoid redundant downloads
 
+rm -f "$orig_base.log"
+touch "$orig_base.log"
+
 # Check if the Docker container exists
 container_exists=$(docker container inspect $CONTAINER 2>/dev/null)
 if [ "$container_exists" = "[]" ]; then
@@ -110,17 +113,17 @@ if [ "$container_exists" = "[]" ]; then
     docker-compose up -d
     sleep 2
     # docker exec -it $CONTAINER python3 -c "from TTS.utils.manage import ModelManager; ModelManager().download_model('$MODEL'); ModelManager().download_model('$VOCODER')"
-    docker exec -it $CONTAINER python3 -c "from TTS.utils.manage import ModelManager; ModelManager().download_model('$MODEL')"
+    docker exec -it $CONTAINER python3 -c "from TTS.utils.manage import ModelManager; ModelManager().download_model('$MODEL')" >>"$orig_base.log" 2>&1
     sleep 2
 else
     echo "Docker container '$CONTAINER' found."
 fi
 
 # check if docker container is running
-container_running=$(docker ps | grep -i "$CONTAINER")
+container_running=$(docker ps 2>/dev/null | grep -i "$CONTAINER")
 if [ -z "$container_running" ]; then
     echo "Docker container '$CONTAINER' is not running. Starting the container..."
-    docker container start $CONTAINER
+    docker container start $CONTAINER >>"$orig_base.log" 2>&1
     sleep 2
 else
     echo "Docker container '$CONTAINER' is running."
@@ -132,7 +135,7 @@ fi
 
 # Function: md_to_text
 # ------------------------------------
-# This function processes a chunk of the markdown file to convert it into plain text 
+# This function processes a chunk of the markdown file to convert it into plain text
 # using a Python script embedded within the shell script.
 #
 # Parameters:
@@ -205,8 +208,8 @@ PYTHON_EOF
 
 # Function: clean_markdown
 # ------------------------------------
-# Performs additional cleaning steps on markdown input to improve suitability for narration. 
-# The function takes two arguments: the input markdown file path ($1) and the output file path ($2). 
+# Performs additional cleaning steps on markdown input to improve suitability for narration.
+# The function takes two arguments: the input markdown file path ($1) and the output file path ($2).
 # TODO: find a better way to insert pauses
 #
 # The steps performed by the function include:
@@ -275,12 +278,12 @@ generate_audio() {
         --model_name "$MODEL" \
         --out_path "$docker_out" \
         --speaker_idx "$SPEAKER" \
-        --use_cuda true >/dev/null 2>&1
+        --use_cuda true >>"$orig_base.log" 2>&1
     # --vocoder_name "$VOCODER" \
 
     # Convert the generated WAV file to MP3
     # ffmpeg -i "$wave_file" -filter:a "rubberband=pitch=1.059463094352953, rubberband=tempo=.80" -acodec copy "$mp3_file" >/dev/null 2>&1
-    ffmpeg -i "$wave_file" -filter:a atempo=.78 "$mp3_file" >/dev/null 2>&1
+    ffmpeg -i "$wave_file" -filter:a atempo=.78 "$mp3_file" >>"$orig_base.log" 2>&1
     rm -f "$wave_file" >/dev/null 2>&1
     rm -f "$1" >/dev/null 2>&1
 }
@@ -334,9 +337,9 @@ else
     mp3_files=$(ls "output/$orig_base-part-"*.mp3 2>/dev/null | tr '\n' ' ')
     echo "Merging audio chunks into one MP3 file."
     cmd="/usr/bin/mp3wrap output/$orig_base.mp3 $mp3_files"
-    eval "$cmd" >/dev/null 2>&1
+    eval "$cmd" >>"$orig_base.log" 2>&1
     cmd="mv -f output/${orig_base}_MP3WRAP.mp3 output/$orig_base.mp3"
-    eval "$cmd" >/dev/null 2>&1
+    eval "$cmd" >>"$orig_base.log" 2>&1
     echo "Final audio file: $orig_base.mp3"
     rm -f "output/$orig_base-part-"*.mp3 >/dev/null 2>&1
     rm -f "output/$orig_base-part-"*.wav >/dev/null 2>&1
@@ -345,18 +348,18 @@ else
 fi
 
 # Return to the original directory
-cd "$return_dir" >/dev/null 2>&1 
+cd "$return_dir" >/dev/null 2>&1
 
 # Move the final audio file to the original directory
 mv -f "$app_dir/output/$orig_base.mp3" . >/dev/null 2>&1
 
 # Stop the Docker container
 echo "Stopping Docker container '$CONTAINER'..."
-docker container stop $CONTAINER >/dev/null 2>&1
+docker container stop $CONTAINER >>"$orig_base.log" 2>&1
 
 # Play the final audio file if requested with '-p'
-echo "Playing the final audio file..."
 if [ $PLAY = true ]; then
+    echo "Playing the final audio file..."
     ffplay -v 0 -nodisp -autoexit "$orig_base.mp3"
 fi
 
