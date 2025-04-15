@@ -1,0 +1,10 @@
+local/
+logs/
+models/
+notebooks/
+input/
+output/
+TTS/
+venv/
+.github/
+TTS.code-workspace

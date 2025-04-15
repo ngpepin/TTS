@@ -1,0 +1,17 @@
+# docker-compose.yml
+
+services:
+  coqui-tts:
+    container_name: coqui-tts
+    image: ghcr.io/coqui-ai/tts:latest
+    runtime: nvidia  
+    ports:
+      - "5002:5002"
+    entrypoint: ["python3", "TTS/server/server.py"]
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    volumes:
+      - /home/npepin/Projects/TTS/models:/app/TTS/models
+      - /home/npepin/Projects/TTS/logs:/app/TTS/logs
+      - /home/npepin/Projects/TTS/output:/output
+    restart: unless-stopped
