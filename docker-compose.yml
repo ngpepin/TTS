@@ -11,7 +11,7 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
     volumes:
-      - /home/npepin/Projects/TTS/models:/app/TTS/models
-      - /home/npepin/Projects/TTS/logs:/app/TTS/logs
-      - /home/npepin/Projects/TTS/output:/output
+      - $HOME/Projects/TTS/models:/app/TTS/models
+      - $HOME/Projects/TTS/logs:/app/TTS/logs
+      - $HOME/Projects/TTS/output:/output
     restart: unless-stopped

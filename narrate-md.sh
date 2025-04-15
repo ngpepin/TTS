@@ -22,6 +22,7 @@
 #   <input.md>    The input markdown file to be converted into audio.
 #
 # Prerequisites:
+#   - Host Filesystem: Assumes $HOME/Projects/TTS/ is available as the working directory with all pulled files.
 #   - Docker: Ensure Docker is installed and running.
 #   - Docker Compose: Required for managing the TTS container. Version provided enables GPU support.
 #   - ffmpeg: Used for audio processing and merging.
