@@ -1,33 +1,61 @@
 #!/bin/bash
-# This script converts a markdown file to an audio file using TTS and Docker.
-# It cleans the markdown file, splits it into chunks if necessary, and generates audio for each chunk.
-# It also merges the audio chunks into one final audio file.
+# Script: narrate-md.sh
+# Author: Nick Pepin
+# Date: 2025-04
 #
-# Usage: ./narrate-md.sh [-p] <input.md>
+# WARNING: This script is a work in progress, contains minimal error handling, and may not function as intended.
+# ----------------------------------------------------------------------------------------------------------------
+#
+# This script converts a markdown file into an audio file using Text-to-Speech (TTS) and Docker.
+#
+# It performs the following steps:
+# 1. Cleans the input markdown file.
+# 2. Splits the markdown content into manageable chunks if necessary.
+# 3. Generates audio for each chunk using TTS.
+# 4. Merges the generated audio chunks into a single final audio file.
+#
+# Usage:
+#   ./narrate-md.sh [-p] <input.md>
 #
 # Options:
-# -p: Play the audio file after generation
-# <input.md>: The input markdown file to be converted to audio
+#   -p            Play the generated audio file after processing.
+#   <input.md>    The input markdown file to be converted into audio.
 #
-# Requirements:
-# - Docker
-# - Docker Compose
-# - ffmpeg
-# - mp3wrap
-# - str (
+# Prerequisites:
+#   - Docker: Ensure Docker is installed and running.
+#   - Docker Compose: Required for managing the TTS container. Version provided enables GPU support.
+#   - ffmpeg: Used for audio processing and merging.
+#   - mp3wrap: Utility for combining multiple MP3 files.
+#   - str: A string manipulation tool (if used in the script).
+#
+# VCTK Model and Coqui-TTS
+# ----------------------------------------------------------------------------------------------------------------
+# VCTK Model:
+#   - The VCTK model is a pre-trained Text-to-Speech (TTS) model designed for high-quality speech synthesis.
+#   - It is based on the VCTK dataset, which contains recordings of multiple speakers with various accents.
+#   - The model supports speaker-specific synthesis by using speaker IDs (e.g., "p230") to generate speech in different voices.
+#   - The model is compatible with Coqui-TTS, a flexible and open-source TTS framework.
+#
+# Coqui-TTS:
+#   - Coqui-TTS is an open-source Text-to-Speech framework that supports training and inference of TTS models.
+#   - It provides a wide range of pre-trained models, including VCTK, LJSpeech, and others.
+#   - Coqui-TTS supports advanced features such as multi-speaker synthesis, vocoders, and GPU acceleration.
+#   - The framework is designed to be modular and extensible, making it suitable for research and production use cases.
+#   - In this script, Coqui-TTS is used within a Docker container to generate audio files from text input.
 
-MAX_LINES_PER_CHUNK=20
-MODEL="tts_models/en/vctk/vits"
+# Paramaters
+MAX_LINES_PER_CHUNK=20 # Maximum lines per chunk of the markdown file
+MODEL="tts_models/en/vctk/vits" # VCTK model
+SPEAKER="p230" # VCTK speaker ID
+CONTAINER="coqui-tts" # Docker container name
 # MODEL="tts_models/en/ljspeech/tacotron2-DDC_ph"
 # VOCODER="vocoder_models/en/ljspeech/univnet"
-SPEAKER="p230" # VCTK speaker ID
-CONTAINER="coqui-tts"
 
 return_dir="$pwd"
 app_dir="$HOME/Projects/TTS"
-
-# Input/Output config
 INPUT_MD="$1"
+
+# If no arguments provided, show usage
 [ -z "$INPUT_MD" ] && {
     echo "Converts a markdown file to an audio file using TTS and Docker. The MP3 file is created in the current directory."
     echo "Usage: $0 [-p] <input.md>"
@@ -37,6 +65,7 @@ INPUT_MD="$1"
     exit 1
 }
 
+# Check for command line switches
 PLAY=false
 while true; do
     case "$1" in
@@ -70,7 +99,8 @@ cd "$app_dir" >/dev/null 2>&1 || {
 }
 
 # Create subdirectories if they don't exist
-mkdir -p input output >/dev/null 2>&1
+mkdir -p input output logs models >/dev/null 2>&1
+# TODO: make the container use the models/ bindmount to avoid redundant downloads
 
 # Check if the Docker container exists
 container_exists=$(docker container inspect $CONTAINER 2>/dev/null)
@@ -95,9 +125,37 @@ else
     echo "Docker container '$CONTAINER' is running."
 fi
 
-#################################
+#####################################################################
+# FUNCTIONS
+#####################################################################
 
-# Step 1: Clean markdown using Python
+# Function: md_to_text
+# ------------------------------------
+# This function processes a chunk of the markdown file to convert it into plain text 
+# using a Python script embedded within the shell script.
+#
+# Parameters:
+#   $1 - Input Markdown file path
+#   $2 - Output plain text file path
+#
+# Description:
+#   - The function reads the input Markdown file and applies a series of regex-based
+#     transformations to clean and extract plain text content.
+#   - The transformations include:
+#       - Removing HTML comments, tags, and excessive newlines.
+#       - Stripping Markdown syntax such as headings, links, bold/italic formatting,
+#         inline code, code blocks, and list markers.
+#       - Removing images and trailing whitespace.
+#   - The cleaned text is written to the specified output file.
+#
+# Usage:
+#   md_to_text <input_markdown_file> <output_text_file>
+#
+# Notes:
+#   - The function uses Python 3 for text processing.
+#   - Ensure that the input file exists and is readable.
+#   - The output file will be overwritten if it already exists.
+#
 md_to_text() {
     python3 - "$1" <<'PYTHON_EOF' >"$2"
 import re
@@ -144,6 +202,25 @@ except Exception as e:
 PYTHON_EOF
 }
 
+# Function: clean_markdown
+# ------------------------------------
+# Performs additional cleaning steps on markdown input to improve suitability for narration. 
+# The function takes two arguments: the input markdown file path ($1) and the output file path ($2). 
+# TODO: find a better way to insert pauses
+#
+# The steps performed by the function include:
+#
+# 1. Invoking a Python script `md_to_text` to process the input markdown file ($1) and
+#    save the initial cleaned output to the specified output file ($2).
+# 2. Using string replacement commands (`str replace`) to:
+#    - Replace ". " with ".. ".
+#    - Replace "," with ",,".
+#    - Replace "; " with ";, ".
+#    - Replace ": " with ":, ".
+#    - Add commas around parentheses and replace "/" with ",,".
+#    - Ensure "e.g." is followed by a comma ("e.g.,").
+# 3. Using `sed` to replace newline characters with a pattern of newline followed by "....".
+#
 clean_markdown() {
     # Clean markdown using Python script
     md_to_text "$1" "$2"
@@ -155,7 +232,33 @@ clean_markdown() {
     mv $temp_file "$2" >/dev/null 2>&1
 }
 
-# Step 2: Generate TTS via Docker
+# Function: generate_audio
+# ------------------------------------
+# This function generate an audio file from the chunked text input using a Docker TTS (Text-to-Speech)
+# container and converts the output to MP3 format.
+#
+# Parameters:
+#   $1 - Path to the input text file containing the text to be converted to audio.
+#   $2 - Base path for the output audio files (without extension).
+#
+# Functionality:
+#   1. Extracts the base name and constructs paths for WAV and MP3 files.
+#   2. Uses a Docker container to generate a WAV audio file from the input text.
+#      - The TTS model, speaker index, and CUDA usage are configurable via environment variables:
+#        - $CONTAINER: Name of the Docker container running the TTS service.
+#        - $MODEL: Name of the TTS model to use.
+#        - $SPEAKER: Speaker index for voice selection.
+#      - The generated WAV file is stored in the Docker container's `/output` directory.
+#   3. Converts the generated WAV file to an MP3 file using `ffmpeg`.
+#      - Applies an audio filter to adjust playback speed (tempo).
+#   4. Cleans up temporary files:
+#
+# Notes:
+#   - The `ffmpeg` command is configured to adjust the tempo of the audio.
+#   - Ensure the required environment variables ($CONTAINER, $MODEL, $SPEAKER) are set before running the script.
+#   - The function assumes that the Docker container is already running and accessible.
+# TODO: Error handling is minimal; consider adding checks for successful execution of commands.
+#
 generate_audio() {
     local base="$2"
     local wave_file="${base}.wav"
@@ -181,6 +284,7 @@ generate_audio() {
     rm -f "$1" >/dev/null 2>&1
 }
 
+# Overall process flow
 process() {
     local file="$1"
     local file_base="${file##*/}"
@@ -192,42 +296,40 @@ process() {
 
     # Clean the markdown file
     clean_markdown "$file" "$cleaned_txt"
-    
+
     # Generate audio file
     local base_audio_fn="output/$file_base"
     generate_audio "$cleaned_txt" "$base_audio_fn"
 }
 
-#######################
+#####################################################################
+# MAINLINE
+#####################################################################
 
 echo "Processing $INPUT_MD..."
 
-# check if the file has more than MAX_LINES_PER_CHUNK lines
+# Check if the file has more than MAX_LINES_PER_CHUNK lines
 line_count=$(wc -l <"$INPUT_MD")
 if [ "$line_count" -le $MAX_LINES_PER_CHUNK ]; then
 
-    # if the file doesn't need splitting, process it directly
+    # If the file doesn't need splitting, process it directly
     process "$INPUT_MD"
-    if [ $PLAY = true ]; then
-        # Play the audio file
-        ffplay -v 0 -nodisp -autoexit "output/$orig_base.mp3"
-    fi
 else
 
-    # split the file into parts
+    # Split the file into parts
     rm "input/$orig_base-part-*" >/dev/null 2>&1
     split -l $MAX_LINES_PER_CHUNK -d --suffix-length=5 "$INPUT_MD" "input/$orig_base-part-"
 
     rm -f "output/$orig_base-part-"*.mp3 >/dev/null 2>&1
     rm -f "output/$orig_base-part-"*.wav >/dev/null 2>&1
 
-    # iterate through the files
+    # Iterate through the files to process each chunk
     for file in input/$orig_base-part-*; do
         # echo "Performing TTS on chunk $file..."
         process "$file"
     done
 
-    # merge the audio files
+    # Merge the audio chunks into one MP3 file
     mp3_files=$(ls "output/$orig_base-part-"*.mp3 2>/dev/null | tr '\n' ' ')
     echo "Merging audio chunks into one MP3 file."
     cmd="/usr/bin/mp3wrap output/$orig_base.mp3 $mp3_files"
@@ -239,14 +341,22 @@ else
     rm -f "output/$orig_base-part-"*.wav >/dev/null 2>&1
     rm -f "input/$orig_base-part-"* >/dev/null 2>&1
 
-    if [ $PLAY = true ]; then
-        # Play the audio file
-        ffplay -v 0 -nodisp -autoexit "output/$orig_base.mp3"
-    fi
 fi
 
-cd "$return_dir" >/dev/null 2>&1 || {
-    echo "Error: Failed to change directory back to $return_dir"
-}
-mv -f "$return_dir/output/$orig_base.mp3" . >/dev/null 2>&1
+# Return to the original directory
+cd "$return_dir" >/dev/null 2>&1 
+
+# Move the final audio file to the original directory
+mv -f "$app_dir/output/$orig_base.mp3" . >/dev/null 2>&1
+
+# Stop the Docker container
+echo "Stopping Docker container '$CONTAINER'..."
 docker container stop $CONTAINER >/dev/null 2>&1
+
+# Play the final audio file if requested with '-p'
+echo "Playing the final audio file..."
+if [ $PLAY = true ]; then
+    ffplay -v 0 -nodisp -autoexit "$orig_base.mp3"
+fi
+
+echo "Done."
